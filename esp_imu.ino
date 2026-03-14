@@ -32,12 +32,6 @@ void updateTargetIP() {
     else if (currentSSID == "Ju9Sork") {
         current_target_ip = "172.20.10.15"; 
     }
-    // else if (currentSSID == "WiFi_3_Name") {
-    //     current_target_ip = "192.168.0.255";
-    // }
-    // else if (currentSSID == "WiFi_4_Name") {
-    //     current_target_ip = "192.168.1.255";
-    // }
     else {
         current_target_ip = "192.168.1.255"; 
     }
@@ -71,9 +65,6 @@ void setup() {
 
   wifiMulti.addAP("Worm_32.exe_2.5G", "0E040E270E22");
   wifiMulti.addAP("Ju9Sork", "password");
-  // wifiMulti.addAP("WiFi_3_Name", "WiFi_3_Password");
-  // wifiMulti.addAP("WiFi_4_Name", "WiFi_4_Password");
-  // wifiMulti.addAP("WiFi_5_Name", "WiFi_5_Password");
 
   Serial.println("[1/3] Connecting to WiFi Multi...");
   
@@ -98,7 +89,6 @@ void setup() {
     }
   }
 
-  //(10,000 us = 100Hz)
   bno08x.enableReport(SH2_ROTATION_VECTOR, 10000);
   bno08x.enableReport(SH2_ACCELEROMETER, 10000);
   bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, 10000);
@@ -109,7 +99,6 @@ void setup() {
 }
 
 void loop() {
-  // ตรวจสอบการเชื่อมต่อ WiFi และอัปเดต IP อัตโนมัติเมื่อ SSID เปลี่ยน
   if (wifiMulti.run() != WL_CONNECTED) {
     digitalWrite(LED_PIN, LOW);
     return; 
@@ -117,13 +106,12 @@ void loop() {
   
   digitalWrite(LED_PIN, HIGH);
 
-  // ถ้าเปลี่ยน WiFi ให้เปลี่ยน Target IP ทันที
   if (WiFi.SSID() != lastSSID) {
     updateTargetIP();
     lastSSID = WiFi.SSID();
   }
 
-  // get data from BNO08x
+
   if (bno08x.getSensorEvent(&sensorValue)) {
     switch (sensorValue.sensorId) {
       case SH2_ROTATION_VECTOR:
@@ -147,32 +135,24 @@ void loop() {
     }
   }
 
-  // ส่งข้อมูลทุก 10ms (100Hz)
-  // if (millis() - lastSendTime >= 10) {
-  //   lastSendTime = millis();
-  //   char buffer[300];
-    
-  //   snprintf(buffer, sizeof(buffer), "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f",
-  //            qw, qx, qy, qz, ax, ay, az, gx, gy, gz, mx, my, mz, lx, ly, lz);
-    
-  //   udp.beginPacket(current_target_ip.c_str(), UDP_PORT);
-  //   udp.print(buffer);
-  //   udp.endPacket();
-  // }
 
-  float target_hz = 10.0; // hz setting
-  unsigned long interval = 1000 / target_hz; 
+  const float target_hz = 10.0; //10hz
+  const unsigned long interval = 1000 / target_hz; 
 
-  if (millis() - lastSendTime >= interval) {
-    lastSendTime = millis();
-    char buffer[300];
+  unsigned long currentTime = millis();
+  if (currentTime - lastSendTime >= interval) {
+    lastSendTime = currentTime;
     
-    // sent (Quaternion, Accel, Gyro, Mag, Linear Accel)
-    snprintf(buffer, sizeof(buffer), "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f",
-             qw, qx, qy, qz, ax, ay, az, gx, gy, gz, mx, my, mz, lx, ly, lz);
+    char buffer[256]; //
     
-    udp.beginPacket(current_target_ip.c_str(), UDP_PORT);
-    udp.print(buffer);
-    udp.endPacket();
+   
+    int len = snprintf(buffer, sizeof(buffer), "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f",
+                       qw, qx, qy, qz, ax, ay, az, gx, gy, gz, mx, my, mz, lx, ly, lz);
+    
+    if (len > 0) {
+      udp.beginPacket(current_target_ip.c_str(), UDP_PORT);
+      udp.write((uint8_t*)buffer, len);
+      udp.endPacket();
+    }
   }
 }
