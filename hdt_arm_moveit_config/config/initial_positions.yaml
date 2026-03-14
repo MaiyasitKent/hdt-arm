@@ -1,0 +1,8 @@
+# Default initial positions for hdt_arm's ros2_control fake system
+
+initial_positions:
+  elbow_joint: 0
+  shoulder_pitch_joint: 0
+  shoulder_roll_joint: 0
+  upperarm_joint: 0
+  wrist_joint: 0

@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="hdt_arm">
+    <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
+
+    <!-- Import hdt_arm urdf file -->
+    <xacro:include filename="$(find hdt_arm_description)/urdf/hdt_arm.urdf" />
+
+    <!-- Import control_xacro -->
+    <xacro:include filename="hdt_arm.ros2_control.xacro" />
+
+    
+    <!-- <xacro:hdt_arm_ros2_control name="FakeSystem" initial_positions_file="$(arg initial_positions_file)"/> -->
+    <xacro:hdt_arm_ros2_control name="GazeboSystem" initial_positions_file="$(arg initial_positions_file)"/>
+
+</robot>

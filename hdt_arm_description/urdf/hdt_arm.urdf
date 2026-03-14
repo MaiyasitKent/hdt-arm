@@ -1,0 +1,360 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+  <robot
+    name="hdt_arm">
+    
+  <link name="world"/>
+  
+  <joint name="world_to_base" type="fixed">
+    <parent link="world"/>
+    <child link="base_link"/>
+  </joint>
+  
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="-0.00185265442989896 0.000124881747033144 0.307106424185721"
+        rpy="0 0 0" />
+      <mass
+        value="3.08474382724207" />
+      <inertia
+        ixx="0.0906570966744558"
+        ixy="3.69583657226193E-07"
+        ixz="2.15121154278286E-09"
+        iyy="0.092521893742773"
+        iyz="1.74300866658949E-09"
+        izz="0.0031647521867604" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://hdt_arm_description/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://hdt_arm_description/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="shoulder_link">
+    <inertial>
+      <origin
+        xyz="-8.64470843933707E-06 4.94185966593008E-08 0.0228817013811624"
+        rpy="0 0 0" />
+      <mass
+        value="0.131804544036158" />
+      <inertia
+        ixx="9.76911612624426E-05"
+        ixy="-5.9935573864212E-10"
+        ixz="3.73214819741335E-08"
+        iyy="0.000128869663534819"
+        iyz="1.00323807987968E-10"
+        izz="0.000140540831089039" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://hdt_arm_description/meshes/shoulder_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://hdt_arm_description/meshes/shoulder_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="shoulder_pitch_joint"
+    type="revolute">
+    <origin
+      xyz="-0.097339 -0.025213 0.5798"
+      rpy="1.5708 0.0027023 -1.5708" />
+    <parent
+      link="base_link" />
+    <child
+      link="shoulder_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.57"
+      upper="3.142"
+      effort="30"
+      velocity="2.5" />
+    <dynamics
+      damping="3"
+      friction="0.3" />
+  </joint>
+  <link
+    name="upperarm1_link">
+    <inertial>
+      <origin
+        xyz="-0.0270974794382298 -0.000335518010162284 -0.000215085285874606"
+        rpy="0 0 0" />
+      <mass
+        value="0.126584658015041" />
+      <inertia
+        ixx="5.37889563161172E-05"
+        ixy="3.69874660150051E-07"
+        ixz="2.06968413231269E-07"
+        iyy="4.85237849080729E-05"
+        iyz="5.57113526327867E-09"
+        izz="5.80191581216142E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://hdt_arm_description/meshes/upperarm1_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://hdt_arm_description/meshes/upperarm1_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="shoulder_roll_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0.05"
+      rpy="0 0.0050003493751645 1.57079632679483" />
+    <parent
+      link="shoulder_link" />
+    <child
+      link="upperarm1_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="-0.1"
+      upper="2.356"
+      effort="35"
+      velocity="2.5" />
+    <dynamics
+      damping="3.5"
+      friction="0.35" />
+  </joint>
+  <link
+    name="upperarm2_link">
+    <inertial>
+      <origin
+        xyz="0.000642273523111969 -0.00186847295716311 0.0596995610605822"
+        rpy="0 0 0" />
+      <mass
+        value="0.366089716558351" />
+      <inertia
+        ixx="0.000290203472897758"
+        ixy="1.15521440059697E-06"
+        ixz="2.1949071021368E-07"
+        iyy="0.000291669697328334"
+        iyz="3.45228644880983E-05"
+        izz="0.000213729682110031" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://hdt_arm_description/meshes/upperarm2_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://hdt_arm_description/meshes/upperarm2_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="upperarm_joint"
+    type="revolute">
+    <origin
+      xyz="-0.058125 -0.0007019 1.8051E-05"
+      rpy="1.5708 1.5699 -1.5708" />
+    <parent
+      link="upperarm1_link" />
+    <child
+      link="upperarm2_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="20"
+      velocity="3" />
+    <dynamics
+      damping="1.5"
+      friction="0.2" />
+  </joint>
+  <link
+    name="forearm1_link">
+    <inertial>
+      <origin
+        xyz="0.00446939183598116 -0.00186709418557896 0.050046419135702"
+        rpy="0 0 0" />
+      <mass
+        value="0.190624207792798" />
+      <inertia
+        ixx="0.00010792265733471"
+        ixy="1.66343343520877E-06"
+        ixz="1.04671109179094E-05"
+        iyy="0.000135014500587215"
+        iyz="-4.26246418274752E-06"
+        izz="0.000103429228625086" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://hdt_arm_description/meshes/forearm1_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://hdt_arm_description/meshes/forearm1_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="elbow_joint"
+    type="revolute">
+    <origin
+      xyz="0 0.00179999999999941 0.130288231760884"
+      rpy="0.0108598638667313 0 0" />
+    <parent
+      link="upperarm2_link" />
+    <child
+      link="forearm1_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="-1.9"
+      upper="0"
+      effort="30"
+      velocity="2.5" />
+    <dynamics
+      damping="2.5"
+      friction="0.25" />
+  </joint>
+  <link
+    name="forearm2_link">
+    <inertial>
+      <origin
+        xyz="-3.83187311991939E-07 -0.000790994594038724 0.0329193741039864"
+        rpy="0 0 0" />
+      <mass
+        value="0.111412113216521" />
+      <inertia
+        ixx="7.13738774456359E-05"
+        ixy="-3.80430175827502E-12"
+        ixz="-1.14269217650218E-09"
+        iyy="7.30944697068781E-05"
+        iyz="1.1651157781337E-06"
+        izz="6.25052820262287E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://hdt_arm_description/meshes/forearm2_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://hdt_arm_description/meshes/forearm2_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="wrist_joint"
+    type="revolute">
+    <origin
+      xyz="0.00151379184988912 0.000199999999999732 0.0852338392812358"
+      rpy="0 0 1.63811711390951" />
+    <parent
+      link="forearm1_link" />
+    <child
+      link="forearm2_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="12"
+      velocity="3.5" />
+    <dynamics
+      damping="1"
+      friction="0.1" />
+  </joint>
+</robot>
