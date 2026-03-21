@@ -1,0 +1,8 @@
+home_position_node:
+  ros__parameters:
+    initial_positions:
+      shoulder_pitch_joint: 0.0
+      shoulder_roll_joint: 0.0
+      upperarm_joint: 0.0
+      elbow_joint: 0.0
+      wrist_joint: 0.0

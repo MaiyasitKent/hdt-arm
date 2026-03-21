@@ -1,3 +1,38 @@
+/**
+ * udp_imu_broadcaster.cpp
+ *
+ * รับ UDP packet จาก ESP32 firmware และ publish เป็น ROS2 IMU topic
+ *
+ * ====================================================
+ * Changes from original
+ * ====================================================
+ * [B1] Binary packet format (16 bytes) แทน ASCII (64+ bytes)
+ *      struct { float qw, qx, qy, qz }
+ *      → ลด parse overhead, ลด WiFi payload
+ *
+ * [B2] ลบ LPF ออกจาก broadcaster
+ *      เดิม: broadcaster กรอง (alpha=0.3) + node กรอง (alpha=0.2) = delay สองชั้น
+ *      ใหม่: pass-through quaternion ตรงๆ ให้ node จัดการเอง
+ *
+ * [B3] ลบ Zero Motion Detection ออก
+ *      gyro data ไม่ได้ส่งมาแล้วใน firmware ใหม่
+ *      zero motion ใน broadcaster ไม่ช่วยลด jitter จริง
+ *
+ * [B4] timer 10ms → 1ms (1000Hz polling)
+ *      ทำให้ packet ที่มาถึงถูก forward ออกเร็วขึ้น
+ *      UDP buffer drain loop ยังคงอยู่ → drain ทุก packet ใน buffer
+ *
+ * [B5] ลบ angular_velocity และ linear_acceleration ออกจาก message
+ *      firmware ใหม่ไม่ส่งค่าเหล่านี้แล้ว set เป็น 0 เพื่อความสะอาด
+ *
+ * UDP Packet Format ที่รับ (16 bytes, little-endian):
+ *   [0-3]   float qw
+ *   [4-7]   float qx
+ *   [8-11]  float qy
+ *   [12-15] float qz
+ * ====================================================
+ */
+
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <arpa/inet.h>
@@ -5,114 +40,102 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <cmath>
- 
+#include <cstring>
+
+// [B1] Binary packet struct ต้องตรงกับ firmware
+struct __attribute__((packed)) ImuPacket {
+  float qw, qx, qy, qz;
+};
+
 class DualUdpImuNode : public rclcpp::Node {
 public:
-    DualUdpImuNode() : Node("udp_imu_node") {
-        // สร้าง Publisher 2 ตัวแยกกัน
-        pub_forearm_ = this->create_publisher<sensor_msgs::msg::Imu>("/imu/forearm", 10);
-        pub_uperarm = this->create_publisher<sensor_msgs::msg::Imu>("/imu/upperarm", 10);
-        
-        // เปิด Socket รอรับ 2 Port พร้อมกัน
-        sock_upper_   = setup_udp_socket(8888);
-        sock_forearm_ = setup_udp_socket(8889);
-        
-        timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(2),
-            std::bind(&DualUdpImuNode::timer_callback, this)
-        );
-        RCLCPP_INFO(this->get_logger(), "Dual IMU Node Started!");
-        RCLCPP_INFO(this->get_logger(), "Listening on Port 8888 (Forearm) & 8889 (Wrist)");
-    }
- 
-    ~DualUdpImuNode() {
-        close(sock_forearm_);
-        close(sock_upper_);
-    }
- 
+  DualUdpImuNode() : Node("udp_imu_node") {
+    pub_upperarm_ = create_publisher<sensor_msgs::msg::Imu>("/imu/upperarm", 10);
+    pub_forearm_  = create_publisher<sensor_msgs::msg::Imu>("/imu/forearm",  10);
+
+    sock_upper_   = setup_udp_socket(8888);
+    sock_forearm_ = setup_udp_socket(8889);
+
+    // [B4] poll ทุก 1ms แทน 10ms → forward packet เร็วขึ้น
+    timer_ = create_wall_timer(
+      std::chrono::milliseconds(1),
+      std::bind(&DualUdpImuNode::timer_callback, this));
+
+    RCLCPP_INFO(get_logger(), "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    RCLCPP_INFO(get_logger(), "  udp_imu_broadcaster  [binary format, no LPF]");
+    RCLCPP_INFO(get_logger(), "  Port 8888 → /imu/upperarm");
+    RCLCPP_INFO(get_logger(), "  Port 8889 → /imu/forearm");
+    RCLCPP_INFO(get_logger(), "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  }
+
+  ~DualUdpImuNode() {
+    close(sock_upper_);
+    close(sock_forearm_);
+  }
+
 private:
-    int sock_forearm_, sock_upper_;
-    rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr pub_forearm_, pub_uperarm;
-    rclcpp::TimerBase::SharedPtr timer_;
- 
-    // --- แยกตัวแปร Smoothing ของแขน และ ข้อมือ ออกจากกัน ---
-    float f_qw=1.0, f_qx=0.0, f_qy=0.0, f_qz=0.0; // Forearm
-    float w_qw=1.0, w_qx=0.0, w_qy=0.0, w_qz=0.0; // Wrist
-    
-    // ตั้งค่า Filter และ Zero Motion (ปรับแก้ได้ที่นี่)
-    const float alpha = 0.3;
-    const float gyro_threshold = 0.03;
- 
-    int setup_udp_socket(int port) {
-        int sock = socket(AF_INET, SOCK_DGRAM, 0);
-        sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = INADDR_ANY;
-        addr.sin_port = htons(port);
-        bind(sock, (struct sockaddr*)&addr, sizeof(addr));
-        fcntl(sock, F_SETFL, O_NONBLOCK); // สำคัญมาก ทำให้โค้ดไม่ค้างถ้ารอข้อมูล
-        return sock;
+  int sock_upper_, sock_forearm_;
+  rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr pub_upperarm_, pub_forearm_;
+  rclcpp::TimerBase::SharedPtr timer_;
+
+  int setup_udp_socket(int port) {
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+      RCLCPP_ERROR(get_logger(), "Failed to create socket for port %d", port);
+      return -1;
     }
- 
-    // ฟังก์ชันจัดการข้อมูล (ใช้ร่วมกันได้ทั้งแขนและข้อมือ)
-    void process_socket(int sock, rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr pub,
-                        const std::string& frame_id, float& sqw, float& sqx, float& sqy, float& sqz) {
-        char buffer[512];
-        while (true) {
-            int len = recvfrom(sock, buffer, sizeof(buffer) - 1, 0, nullptr, nullptr);
-            if (len > 0) {
-                buffer[len] = '\0';
-                float qw, qx, qy, qz, ax, ay, az, gx, gy, gz, mx, my, mz, lx, ly, lz;
-                
-                // แกะ 16 ค่า
-                if (sscanf(buffer, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f",
-                           &qw, &qx, &qy, &qz, &ax, &ay, &az, &gx, &gy, &gz, &mx, &my, &mz, &lx, &ly, &lz) == 16) {
-                    
-                    // 1. ตรวจจับการหยุดนิ่ง (Zero Motion)
-                    bool is_zero_motion = (std::abs(gx) < gyro_threshold &&
-                                           std::abs(gy) < gyro_threshold &&
-                                           std::abs(gz) < gyro_threshold);
- 
-                    // 2. กรองข้อมูล (Low-Pass Filter)
-                    if (!is_zero_motion) {
-                        sqw = (alpha * qw) + ((1.0 - alpha) * sqw);
-                        sqx = (alpha * qx) + ((1.0 - alpha) * sqx);
-                        sqy = (alpha * qy) + ((1.0 - alpha) * sqy);
-                        sqz = (alpha * qz) + ((1.0 - alpha) * sqz);
-                        // Normalization
-                        float norm = std::sqrt(sqw*sqw + sqx*sqx + sqy*sqy + sqz*sqz);
-                        sqw /= norm; sqx /= norm; sqy /= norm; sqz /= norm;
-                    }
- 
-                    // 3. แพ็กลง ROS2 Message
-                    auto msg = sensor_msgs::msg::Imu();
-                    msg.header.stamp = this->now();
-                    msg.header.frame_id = frame_id;
- 
-                    msg.orientation.w = sqw; msg.orientation.x = sqx;
-                    msg.orientation.y = sqy; msg.orientation.z = sqz;
-                    
-                    msg.angular_velocity.x = gx; msg.angular_velocity.y = gy; msg.angular_velocity.z = gz;
-                    msg.linear_acceleration.x = ax; msg.linear_acceleration.y = ay; msg.linear_acceleration.z = az;
- 
-                    pub->publish(msg);
-                }
-            } else {
-                break; // หมดข้อมูลใน Buffer รอบนี้แล้ว
-            }
-        }
+    sockaddr_in addr{};
+    addr.sin_family      = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port        = htons(port);
+    bind(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
+    fcntl(sock, F_SETFL, O_NONBLOCK);
+    return sock;
+  }
+
+  // [B1][B2][B3] process_socket: binary parse, no LPF, no zero-motion
+  void process_socket(
+    int sock,
+    rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr & pub,
+    const char* frame_id)
+  {
+    ImuPacket pkt;
+
+    // drain ทุก packet ที่รออยู่ใน buffer (ดีกว่ารับทีละ packet)
+    while (true) {
+      int len = recvfrom(sock, &pkt, sizeof(pkt), 0, nullptr, nullptr);
+      if (len != sizeof(ImuPacket)) break;  // หมด buffer หรือ packet ผิด size
+
+      // normalize quaternion (ป้องกัน floating point drift จาก WiFi)
+      float norm = std::sqrt(pkt.qw*pkt.qw + pkt.qx*pkt.qx +
+                             pkt.qy*pkt.qy + pkt.qz*pkt.qz);
+      if (norm < 1e-6f) continue;  // packet เสีย ทิ้ง
+      pkt.qw /= norm; pkt.qx /= norm;
+      pkt.qy /= norm; pkt.qz /= norm;
+
+      // publish
+      sensor_msgs::msg::Imu msg;
+      msg.header.stamp    = now();
+      msg.header.frame_id = frame_id;
+      msg.orientation.w   = pkt.qw;
+      msg.orientation.x   = pkt.qx;
+      msg.orientation.y   = pkt.qy;
+      msg.orientation.z   = pkt.qz;
+      // [B5] angular_velocity และ linear_acceleration = 0 (ไม่ส่งมาแล้ว)
+
+      pub->publish(msg);
     }
- 
-    void timer_callback() {
-        // เช็คและอัปเดตข้อมูลทั้ง 2 เซนเซอร์พร้อมกัน
-        process_socket(sock_forearm_, pub_forearm_, "imu_forearm_link", f_qw, f_qx, f_qy, f_qz);
-        process_socket(sock_upper_, pub_uperarm, "imu_upperarm_link", w_qw, w_qx, w_qy, w_qz);
-    }
+  }
+
+  void timer_callback() {
+    process_socket(sock_upper_,   pub_upperarm_, "imu_upperarm_link");
+    process_socket(sock_forearm_, pub_forearm_,  "imu_forearm_link");
+  }
 };
- 
+
 int main(int argc, char** argv) {
-    rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<DualUdpImuNode>());
-    rclcpp::shutdown();
-    return 0;
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<DualUdpImuNode>());
+  rclcpp::shutdown();
+  return 0;
 }

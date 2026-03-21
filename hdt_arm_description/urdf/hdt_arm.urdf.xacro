@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="hdt_arm">
+
+  <!-- ============================================================
+       Arguments (ส่งมาจาก launch file)
+       ============================================================ -->
+  <xacro:arg name="use_sim"              default="false"/>
+  <xacro:arg name="use_mock_hardware"    default="false"/>
+  <xacro:arg name="mock_sensor_commands" default="false"/>
+  <xacro:arg name="port_name"            default="/dev/ttyUSB0"/>
+  <xacro:arg name="prefix"               default=""/>
+  <xacro:arg name="initial_positions_file"
+             default="$(find hdt_arm_description)/config/initial_positions.yaml"/>
+
+  <!-- Import URDF หลัก (geometry + joints) -->
+  <xacro:include filename="$(find hdt_arm_description)/urdf/hdt_arm.urdf"/>
+
+  <!-- Import ros2_control plugin (สลับ sim/real ตาม use_sim) -->
+  <xacro:include filename="$(find hdt_arm_description)/urdf/hdt_arm.ros2_control.xacro"/>
+
+  <!-- เรียกใช้ macro พร้อมส่ง arguments -->
+  <xacro:hdt_arm_ros2_control
+    name="hdt_arm"
+    use_sim="$(arg use_sim)"
+    use_mock_hardware="$(arg use_mock_hardware)"
+    mock_sensor_commands="$(arg mock_sensor_commands)"
+    port_name="$(arg port_name)"
+    initial_positions_file="$(arg initial_positions_file)"/>
+
+</robot>

@@ -2,20 +2,10 @@
  * imu_kinematics_node.cpp  —  Position Control via Action (preempt mode)
  *
  * Subscribes:  /imu/upperarm, /imu/forearm  (sensor_msgs/Imu)
- * Action:      /arm_controller/follow_joint_trajectory
+ * Action:      /real/arm_controller/follow_joint_trajectory
  * Publishes:   /imu_kinematics/joint_angles  (debug, Float64MultiArray)
- *                data[0-4] = human relative angles (deg)
- *                data[5-9] = robot target positions (deg)
  * Services:    /imu_kinematics/calibrate (std_srvs/Trigger)
- *
- * Strategy:
- *   timer 10Hz → ส่ง action goal ใหม่ทับ goal เก่า (preempt)
- *   controller จะ CANCEL goal เก่าและเริ่ม goal ใหม่ทันที
- *   ไม่มี drift เพราะส่ง position โดยตรง
- *
- * Auto-calibration:
- *   calibrate อัตโนมัติจาก 50 frame แรก
- *   re-calibrate ได้ด้วย: ros2 service call /imu_kinematics/calibrate std_srvs/srv/Trigger {}
+ *              /imu_kinematics/estop     (std_srvs/SetBool)
  */
 
 #include <rclcpp/rclcpp.hpp>
@@ -24,86 +14,93 @@
 #include <control_msgs/action/follow_joint_trajectory.hpp>
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
 #include <std_srvs/srv/trigger.hpp>
+#include <std_srvs/srv/set_bool.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
-
-#include <message_filters/subscriber.h>
-#include <message_filters/sync_policies/approximate_time.h>
-#include <message_filters/synchronizer.h>
 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Vector3.h>
 
+#include <array>
+#include <atomic>
 #include <cmath>
-#include <map>
-#include <string>
-#include <vector>
 #include <mutex>
+#include <string>
 
 using ImuMsg     = sensor_msgs::msg::Imu;
 using FollowJT   = control_msgs::action::FollowJointTrajectory;
 using GoalHandle = rclcpp_action::ClientGoalHandle<FollowJT>;
-using ApproxSync = message_filters::sync_policies::ApproximateTime<ImuMsg, ImuMsg>;
 
-// ─── Low-pass filter ─────────────────────────────────────────────────────────
+enum JIdx { PITCH=0, ROLL=1, TWIST=2, ELBOW=3, WRIST=4, NUM_JOINTS=5 };
+
+static const std::array<const char*, NUM_JOINTS> JOINT_NAMES = {
+  "shoulder_pitch_joint", "shoulder_roll_joint",
+  "upperarm_joint", "elbow_joint", "wrist_joint"
+};
+
+static const std::array<double, NUM_JOINTS> VEL_LIMITS   = { 2.5, 2.5, 3.0, 2.5, 3.5 };
+static const std::array<double, NUM_JOINTS> HARD_LOWER   = { -1.57, -0.1,  -1.57, -1.9,  -1.57 };
+static const std::array<double, NUM_JOINTS> HARD_UPPER   = {  3.142, 2.967,  1.57,  0.0,   1.57 };
+static const std::array<double, NUM_JOINTS> JOINT_SCALE  = { 1.0, -1.0, 1.0, -1.0, 1.0 };
+
 class LowPassFilter {
 public:
-  explicit LowPassFilter(double alpha = 0.2) : alpha_(alpha) {}
-  double update(double x) { v_ = alpha_ * x + (1.0 - alpha_) * v_; return v_; }
-  void reset(double v = 0.0) { v_ = v; }
+  explicit LowPassFilter(double alpha = 0.3) : alpha_(alpha) {}
+  double update(double x) { v_ = alpha_*x + (1.0-alpha_)*v_; return v_; }
+  void   reset(double v = 0.0) { v_ = v; }
 private:
   double alpha_, v_{0.0};
 };
 
-// ─── Joint config ─────────────────────────────────────────────────────────────
-struct JointConfig {
-  double robot_min, robot_max, scale;
-  LowPassFilter lpf;
-  JointConfig() : robot_min(-1.57), robot_max(1.57), scale(1.0), lpf(0.2) {}
-  JointConfig(double mn, double mx, double sc, double alpha = 0.2)
-    : robot_min(mn), robot_max(mx), scale(sc), lpf(alpha) {}
-};
-
-// ─── Node ─────────────────────────────────────────────────────────────────────
 class ImuKinematicsNode : public rclcpp::Node
 {
 public:
   ImuKinematicsNode() : Node("imu_kinematics_node")
   {
-    declare_parameter("auto_calibrate",      true);
-    declare_parameter("calibration_samples", 50);
-    declare_parameter("lpf_alpha",           0.2);
-    declare_parameter("sync_tolerance_ms",   10.0);
-    declare_parameter("send_hz",             10.0);   // ส่ง goal กี่ครั้ง/วินาที
-    declare_parameter("trajectory_duration", 0.2);    // ควรมากกว่า 1/send_hz
+    // ============================================================
+    // [แก้ 1] declare use_sim_time ก่อน parameter อื่นทั้งหมด
+    //         ทำให้ this->now() และ get_clock() ใช้ clock ที่ถูกต้อง
+    //         ทั้งใน real mode และ sim mode
+    // ============================================================
+    // this->declare_parameter_if_not_declared("use_sim_time", rclcpp::ParameterValue(false));
+
+    declare_parameter("auto_calibrate",        true);
+    declare_parameter("calibration_samples",   50);
+    declare_parameter("lpf_alpha",             0.2);
+    declare_parameter("send_hz",               10.0);
+    declare_parameter("trajectory_duration",   0.15);
+    declare_parameter("imu_timeout_ms",        1000.0);
+    declare_parameter("max_jump_deg",          50.0);
+    declare_parameter("soft_limit_margin_deg", 3.0);
 
     auto_calibrate_ = get_parameter("auto_calibrate").as_bool();
     calib_samples_  = get_parameter("calibration_samples").as_int();
     traj_duration_  = get_parameter("trajectory_duration").as_double();
-    double alpha    = get_parameter("lpf_alpha").as_double();
-    double send_hz  = get_parameter("send_hz").as_double();
+    imu_timeout_s_  = get_parameter("imu_timeout_ms").as_double() / 1000.0;
+    max_jump_rad_   = get_parameter("max_jump_deg").as_double() * M_PI / 180.0;
+    use_sim_time_   = get_parameter("use_sim_time").as_bool();
 
-    joint_names_ = {
-      "shoulder_pitch_joint",
-      "shoulder_roll_joint",
-      "upperarm_joint",
-      "elbow_joint",
-      "wrist_joint"
-    };
+    const double alpha   = get_parameter("lpf_alpha").as_double();
+    const double send_hz = get_parameter("send_hz").as_double();
+    const double margin  = get_parameter("soft_limit_margin_deg").as_double() * M_PI / 180.0;
 
-    // scale: human_rel * scale = robot_target (rad)
-    // sign verified from URDF + CSV analysis
-    joint_configs_["shoulder_pitch_joint"] = JointConfig(-1.57,  3.142, -1.0,  alpha);
-    joint_configs_["shoulder_roll_joint"]  = JointConfig(-0.1,   2.356, +1.0,  alpha);
-    joint_configs_["upperarm_joint"]       = JointConfig(-1.57,  1.57,  +0.55, alpha);
-    joint_configs_["elbow_joint"]          = JointConfig(-1.9,   0.0,   -0.82, alpha);
-    joint_configs_["wrist_joint"]          = JointConfig(-1.57,  1.57,  +0.92, alpha);
-
-    for (const auto & n : joint_names_) {
-      ref_angles_[n]       = 0.0;
-      calib_accum_[n]      = 0.0;
-      latest_positions_[n] = 0.0;
+    for (int i = 0; i < NUM_JOINTS; i++) {
+      soft_min_[i] = HARD_LOWER[i] + margin;
+      soft_max_[i] = HARD_UPPER[i] - margin;
+      lpf_[i]      = LowPassFilter(alpha);
     }
+
+    latest_pos_.fill(0.0);
+    prev_pos_.fill(0.0);
+    qu_latest_ = tf2::Quaternion(0, 0, 0, 1);
+    qf_latest_ = tf2::Quaternion(0, 0, 0, 1);
+
+    // [H1] init timestamps
+    const auto clock_type = this->get_clock()->get_clock_type();
+    last_upper_time_    = rclcpp::Time(0, 0, clock_type);
+    last_fore_time_     = rclcpp::Time(0, 0, clock_type);
+    imu_upper_received_ = false;
+    imu_fore_received_  = false;
 
     if (auto_calibrate_) {
       calibrating_ = true;
@@ -112,97 +109,269 @@ public:
         calib_samples_);
     }
 
-    // ── Action client ─────────────────────────────────────────────────────────
+    // ============================================================
+    // [แก้ 2] เพิ่ม namespace /real ให้ตรงกับ launch file
+    // ============================================================
     action_client_ = rclcpp_action::create_client<FollowJT>(
-      this, "/arm_controller/follow_joint_trajectory");
+      this, "/real/arm_controller/follow_joint_trajectory");
 
-    // ── Debug publisher ───────────────────────────────────────────────────────
     pub_debug_ = create_publisher<std_msgs::msg::Float64MultiArray>(
       "/imu_kinematics/joint_angles", 10);
 
-    // ── Calibration service ───────────────────────────────────────────────────
     srv_calib_ = create_service<std_srvs::srv::Trigger>(
       "/imu_kinematics/calibrate",
       std::bind(&ImuKinematicsNode::calib_cb, this,
                 std::placeholders::_1, std::placeholders::_2));
 
-    // ── IMU synchronized subscribers ──────────────────────────────────────────
-    sub_upper_.subscribe(this, "/imu/upperarm");
-    sub_fore_.subscribe(this,  "/imu/forearm");
-    double tol = get_parameter("sync_tolerance_ms").as_double();
-    sync_ = std::make_shared<message_filters::Synchronizer<ApproxSync>>(
-      ApproxSync(20), sub_upper_, sub_fore_);
-    sync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(tol / 1000.0));
-    sync_->registerCallback(std::bind(&ImuKinematicsNode::imu_cb, this,
-      std::placeholders::_1, std::placeholders::_2));
+    srv_estop_ = create_service<std_srvs::srv::SetBool>(
+      "/imu_kinematics/estop",
+      std::bind(&ImuKinematicsNode::estop_cb, this,
+                std::placeholders::_1, std::placeholders::_2));
 
-    // ── Send timer — ส่ง goal ใหม่ทุก 1/send_hz วินาที ───────────────────────
-    auto ms = std::chrono::milliseconds(static_cast<int>(1000.0 / send_hz));
-    send_timer_ = create_wall_timer(ms,
-      std::bind(&ImuKinematicsNode::send_goal, this));
+    sub_upper_ = create_subscription<ImuMsg>(
+      "/imu/upperarm", rclcpp::SensorDataQoS(),
+      std::bind(&ImuKinematicsNode::upper_cb, this, std::placeholders::_1));
+    sub_fore_ = create_subscription<ImuMsg>(
+      "/imu/forearm", rclcpp::SensorDataQoS(),
+      std::bind(&ImuKinematicsNode::fore_cb, this, std::placeholders::_1));
+
+    const auto ms = std::chrono::milliseconds(static_cast<int>(1000.0 / send_hz));
+    send_timer_ = create_wall_timer(ms, std::bind(&ImuKinematicsNode::timer_cb, this));
 
     RCLCPP_INFO(get_logger(), "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    RCLCPP_INFO(get_logger(), "  imu_kinematics_node  [Action preempt %.0fHz]", send_hz);
-    RCLCPP_INFO(get_logger(), "  → /arm_controller/follow_joint_trajectory");
-    RCLCPP_INFO(get_logger(), "  Re-calibrate: ros2 service call /imu_kinematics/calibrate std_srvs/srv/Trigger {}");
+    RCLCPP_INFO(get_logger(), "  imu_kinematics_node v7  [%.0fHz / traj=%.3fs]",
+      send_hz, traj_duration_);
+    RCLCPP_INFO(get_logger(), "  use_sim_time : %s", use_sim_time_ ? "true" : "false");
+    RCLCPP_INFO(get_logger(), "  action       : /real/arm_controller/follow_joint_trajectory");
+    RCLCPP_INFO(get_logger(), "  [H1] watchdog   : %.0f ms", imu_timeout_s_*1000);
+    RCLCPP_INFO(get_logger(), "  [H2] jump check : %.1f deg", max_jump_rad_*180/M_PI);
+    RCLCPP_INFO(get_logger(), "  [H3] vel hints  : enabled");
+    RCLCPP_INFO(get_logger(), "  [H4] soft limits: margin=%.1f deg", margin*180/M_PI);
+    RCLCPP_INFO(get_logger(), "  [H5] e-stop     : ros2 service call /imu_kinematics/estop std_srvs/srv/SetBool \"{data: true}\"");
     RCLCPP_INFO(get_logger(), "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   }
 
 private:
   bool   auto_calibrate_{true};
+  bool   use_sim_time_{false};
   int    calib_samples_;
   double traj_duration_;
+  double imu_timeout_s_;
+  double max_jump_rad_;
 
-  std::vector<std::string>           joint_names_;
-  std::map<std::string, JointConfig> joint_configs_;
-  std::map<std::string, double>      ref_angles_;
-  std::map<std::string, double>      latest_positions_;
+  std::array<double, NUM_JOINTS>        soft_min_, soft_max_;
+  std::array<LowPassFilter, NUM_JOINTS> lpf_;
+  double ref_elbow_{0.0};
+  std::array<double, NUM_JOINTS> latest_pos_, prev_pos_;
 
-  std::mutex calib_mutex_;
-  bool       calibrating_{false};
-  int        calib_count_{0};
-  std::map<std::string, double> calib_accum_;
-  bool       ready_{false};
+  tf2::Quaternion qu_latest_, qf_latest_;
+  std::mutex      imu_mutex_;
 
-  rclcpp_action::Client<FollowJT>::SharedPtr action_client_;
-  GoalHandle::SharedPtr                      current_gh_{nullptr};
+  rclcpp::Time last_upper_time_, last_fore_time_;
+  bool         imu_upper_received_{false};
+  bool         imu_fore_received_{false};
 
+  std::atomic<bool> estop_{false};
+
+  std::mutex     calib_mutex_;
+  bool           calibrating_{false};
+  int            calib_count_{0};
+  double         calib_elbow_accum_{0.0};
+  bool           ready_{false};
+  tf2::Matrix3x3 R_calib_upper_, R_calib_fore_;
+  tf2::Matrix3x3 calib_R_upper_accum_, calib_R_fore_accum_;
+
+  rclcpp_action::Client<FollowJT>::SharedPtr          action_client_;
+  GoalHandle::SharedPtr                               current_gh_{nullptr};
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_debug_;
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr             srv_calib_;
-  rclcpp::TimerBase::SharedPtr                                   send_timer_;
-  message_filters::Subscriber<ImuMsg>                            sub_upper_, sub_fore_;
-  std::shared_ptr<message_filters::Synchronizer<ApproxSync>>     sync_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr  srv_calib_;
+  rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr  srv_estop_;
+  rclcpp::TimerBase::SharedPtr                        send_timer_;
+  rclcpp::Subscription<ImuMsg>::SharedPtr             sub_upper_, sub_fore_;
 
-  // ── Send goal (timer callback) ────────────────────────────────────────────
-  void send_goal()
+  void upper_cb(const ImuMsg::ConstSharedPtr & msg)
   {
-    if (!ready_) return;
+    tf2::Quaternion q(msg->orientation.x, msg->orientation.y,
+                      msg->orientation.z, msg->orientation.w);
+    q.normalize();
+    std::lock_guard<std::mutex> lock(imu_mutex_);
+    qu_latest_          = q;
+    last_upper_time_    = now();
+    imu_upper_received_ = true;
+  }
+
+  void fore_cb(const ImuMsg::ConstSharedPtr & msg)
+  {
+    tf2::Quaternion q(msg->orientation.x, msg->orientation.y,
+                      msg->orientation.z, msg->orientation.w);
+    q.normalize();
+    std::lock_guard<std::mutex> lock(imu_mutex_);
+    qf_latest_         = q;
+    last_fore_time_    = now();
+    imu_fore_received_ = true;
+  }
+
+  void estop_cb(
+    const std_srvs::srv::SetBool::Request::SharedPtr  req,
+    std_srvs::srv::SetBool::Response::SharedPtr       res)
+  {
+    estop_.store(req->data);
+    if (req->data) {
+      if (current_gh_) {
+        action_client_->async_cancel_goal(current_gh_);
+        current_gh_ = nullptr;
+      }
+      RCLCPP_WARN(get_logger(), "━━━ EMERGENCY STOP ACTIVATED ━━━");
+      res->message = "E-stop activated";
+    } else {
+      RCLCPP_INFO(get_logger(), "━━━ E-stop released ━━━");
+      res->message = "E-stop released";
+    }
+    res->success = true;
+  }
+
+  void timer_cb()
+  {
+    if (estop_.load()) return;
+
+    tf2::Quaternion qu, qf;
+    rclcpp::Time t_upper, t_fore;
+    {
+      std::lock_guard<std::mutex> lock(imu_mutex_);
+      qu      = qu_latest_;
+      qf      = qf_latest_;
+      t_upper = last_upper_time_;
+      t_fore  = last_fore_time_;
+    }
+
+    if (imu_upper_received_ && imu_fore_received_) {
+      const double age_u = (now() - t_upper).seconds();
+      const double age_f = (now() - t_fore).seconds();
+      if (age_u > imu_timeout_s_ || age_f > imu_timeout_s_) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+          "IMU timeout! upper=%.1fms fore=%.1fms — holding position",
+          age_u*1000, age_f*1000);
+        return;
+      }
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(calib_mutex_);
+      if (calibrating_) {
+        const tf2::Matrix3x3 Ru(qu), Rf(qf);
+        const tf2::Vector3 bu = Ru * tf2::Vector3(1,0,0);
+        const tf2::Vector3 bf = Rf * tf2::Vector3(1,0,0);
+        calib_R_upper_accum_ = mat_add(calib_R_upper_accum_, Ru);
+        calib_R_fore_accum_  = mat_add(calib_R_fore_accum_,  Rf);
+        calib_elbow_accum_  += std::acos(std::clamp(bu.dot(bf), -1.0, 1.0));
+        if (++calib_count_ >= calib_samples_) {
+          R_calib_upper_ = mat_div(calib_R_upper_accum_, calib_count_);
+          R_calib_fore_  = mat_div(calib_R_fore_accum_,  calib_count_);
+          ref_elbow_     = calib_elbow_accum_ / calib_count_;
+          calibrating_   = false;
+          ready_         = true;
+          for (auto & f : lpf_) f.reset(0.0);
+          prev_pos_.fill(0.0);
+          RCLCPP_INFO(get_logger(), "━━━ Calibration complete! ━━━");
+          RCLCPP_INFO(get_logger(), "  elbow ref = %.3f rad (%.1f deg)",
+            ref_elbow_, ref_elbow_*180/M_PI);
+        }
+        return;
+      }
+      if (!ready_) return;
+    }
+
+    const tf2::Matrix3x3 Ru(qu), Rf(qf);
+    const tf2::Vector3 bu = Ru * tf2::Vector3(1,0,0);
+    const tf2::Vector3 bf = Rf * tf2::Vector3(1,0,0);
+
+    double pitch = 0.0, roll = 0.0;
+    compute_swing_pitch_roll(Ru, R_calib_upper_, pitch, roll);
+
+    const std::array<double, NUM_JOINTS> angles = {{
+      pitch,
+      roll,
+      compute_twist_swing(Ru, R_calib_upper_),
+      std::acos(std::clamp(bu.dot(bf), -1.0, 1.0)) - ref_elbow_,
+      compute_twist_swing(Rf, R_calib_fore_)
+    }};
+
+    std::array<double, NUM_JOINTS> new_pos;
+    for (int i = 0; i < NUM_JOINTS; i++) {
+      const double filtered = lpf_[i].update(angles[i] * JOINT_SCALE[i]);
+      new_pos[i] = std::clamp(filtered, soft_min_[i], soft_max_[i]);
+    }
+
+    for (int i = 0; i < NUM_JOINTS; i++) {
+      const double delta = new_pos[i] - latest_pos_[i];
+      if (std::abs(delta) > max_jump_rad_) {
+        new_pos[i] = latest_pos_[i] + std::copysign(max_jump_rad_, delta);
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 500,
+          "Rate limit joint %d: %.1f->%.1f deg",
+          i, latest_pos_[i]*180/M_PI, new_pos[i]*180/M_PI);
+      }
+    }
+
+    std_msgs::msg::Float64MultiArray dbg;
+    dbg.data.resize(NUM_JOINTS * 2);
+    for (int i = 0; i < NUM_JOINTS; i++) {
+      dbg.data[i]              = angles[i] * 180.0/M_PI;
+      dbg.data[i + NUM_JOINTS] = new_pos[i] * 180.0/M_PI;
+    }
+    pub_debug_->publish(dbg);
+
+    prev_pos_   = latest_pos_;
+    latest_pos_ = new_pos;
+    send_goal_now();
+  }
+
+  void send_goal_now()
+  {
     if (!action_client_->action_server_is_ready()) {
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 3000,
-        "Action server not ready");
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 3000, "Action server not ready");
       return;
     }
 
-    // ── Build trajectory point ────────────────────────────────────────────────
-    trajectory_msgs::msg::JointTrajectoryPoint point;
-    point.velocities.assign(joint_names_.size(), 0.0);
-    point.time_from_start = rclcpp::Duration::from_seconds(traj_duration_);
-    {
-      std::lock_guard<std::mutex> lock(calib_mutex_);
-      for (const auto & n : joint_names_)
-        point.positions.push_back(latest_positions_[n]);
+    if (current_gh_) {
+      auto status = current_gh_->get_status();
+      if (status == rclcpp_action::GoalStatus::STATUS_ACCEPTED ||
+          status == rclcpp_action::GoalStatus::STATUS_EXECUTING) {
+        action_client_->async_cancel_goal(current_gh_);
+      }
+      current_gh_ = nullptr;
     }
 
-    // ── Build goal ────────────────────────────────────────────────────────────
+    trajectory_msgs::msg::JointTrajectoryPoint point;
+    point.positions.assign(latest_pos_.begin(), latest_pos_.end());
+    point.time_from_start = rclcpp::Duration::from_seconds(traj_duration_);
+
+    point.velocities.resize(NUM_JOINTS);
+    for (int i = 0; i < NUM_JOINTS; i++) {
+      double vel = (latest_pos_[i] - prev_pos_[i]) / traj_duration_;
+      point.velocities[i] = std::clamp(vel, -VEL_LIMITS[i], VEL_LIMITS[i]);
+    }
+
     FollowJT::Goal goal;
-    goal.trajectory.header.stamp    = now();
+
+    // ============================================================
+    // [แก้ 3] timestamp
+    //   use_sim_time=false → stamp=0  (execute ทันที, real clock)
+    //   use_sim_time=true  → stamp=now() (ใช้ sim clock จาก Gazebo)
+    //                        ถ้าใช้ 0 controller จะ reject goal
+    //                        เพราะ timestamp ไม่ sync กับ /clock
+    // ============================================================
+    if (use_sim_time_) {
+      goal.trajectory.header.stamp = this->now();
+    } else {
+      goal.trajectory.header.stamp =
+        rclcpp::Time(0, 0, this->get_clock()->get_clock_type());
+    }
+
     goal.trajectory.header.frame_id = "base_link";
-    goal.trajectory.joint_names     = joint_names_;
+    goal.trajectory.joint_names.assign(JOINT_NAMES.begin(), JOINT_NAMES.end());
     goal.trajectory.points.push_back(point);
 
-    // ── Send — controller จะ preempt goal เก่าอัตโนมัติ ─────────────────────
     auto opts = rclcpp_action::Client<FollowJT>::SendGoalOptions();
-
     opts.goal_response_callback =
       [this](const GoalHandle::SharedPtr & gh) {
         if (!gh) {
@@ -211,28 +380,29 @@ private:
         }
         current_gh_ = gh;
       };
-
     opts.result_callback =
       [this](const GoalHandle::WrappedResult & result) {
-        // CANCELED = preempted by next goal — ปกติ ไม่ต้อง log
-        // SUCCEEDED = ถึง target ก่อน goal ถัดไปมา
-        if (result.code == rclcpp_action::ResultCode::ABORTED) {
+        if (result.code == rclcpp_action::ResultCode::ABORTED)
           RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
             "Goal aborted: %s", result.result->error_string.c_str());
-        }
         current_gh_ = nullptr;
       };
-
     action_client_->async_send_goal(goal, opts);
   }
 
-  // ── Calibration service ───────────────────────────────────────────────────
   void calib_cb(
     const std_srvs::srv::Trigger::Request::SharedPtr,
     std_srvs::srv::Trigger::Response::SharedPtr res)
   {
+    if (estop_.load()) {
+      res->success = false;
+      res->message = "Cannot calibrate while e-stop is active";
+      return;
+    }
     std::lock_guard<std::mutex> lock(calib_mutex_);
-    for (const auto & n : joint_names_) calib_accum_[n] = 0.0;
+    calib_elbow_accum_   = 0.0;
+    calib_R_upper_accum_ = tf2::Matrix3x3(0,0,0, 0,0,0, 0,0,0);
+    calib_R_fore_accum_  = tf2::Matrix3x3(0,0,0, 0,0,0, 0,0,0);
     calib_count_ = 0;
     calibrating_ = true;
     ready_       = false;
@@ -241,96 +411,66 @@ private:
     res->message = "Calibrating, hold reference pose (arm hanging down)";
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  static double wrap_pi(double a) {
-    while (a >  M_PI) a -= 2.0 * M_PI;
-    while (a < -M_PI) a += 2.0 * M_PI;
-    return a;
+  static tf2::Matrix3x3 mat_add(const tf2::Matrix3x3 & A, const tf2::Matrix3x3 & B) {
+    tf2::Matrix3x3 C;
+    for (int i=0;i<3;i++) for (int j=0;j<3;j++) C[i][j]=A[i][j]+B[i][j];
+    return C;
   }
 
-  static double compute_twist(const tf2::Matrix3x3 & R) {
-    tf2::Vector3 bone   = R * tf2::Vector3(1, 0, 0);
-    tf2::Vector3 z_sens = R * tf2::Vector3(0, 0, 1);
-    tf2::Vector3 z_perp = z_sens - bone.dot(z_sens) * bone;
-    if (z_perp.length() < 1e-6) return 0.0;
-    z_perp /= z_perp.length();
-    tf2::Vector3 ref(0, 1, 0);  // Y_world (IMU Z หมุน 90° รอบ X)
-    if (std::abs(bone.dot(ref)) > 0.95) ref = tf2::Vector3(0, 0, 1);
-    tf2::Vector3 ref_perp = ref - bone.dot(ref) * bone;
-    if (ref_perp.length() < 1e-6) return 0.0;
-    ref_perp /= ref_perp.length();
-    double sign = (ref_perp.cross(z_perp).dot(bone) >= 0.0) ? 1.0 : -1.0;
-    return sign * std::acos(std::clamp(ref_perp.dot(z_perp), -1.0, 1.0));
+  static tf2::Matrix3x3 mat_div(const tf2::Matrix3x3 & A, double s) {
+    tf2::Matrix3x3 C;
+    for (int i=0;i<3;i++) for (int j=0;j<3;j++) C[i][j]=A[i][j]/s;
+    return C;
   }
 
-  std::map<std::string, double> compute_joint_angles(
-    const tf2::Quaternion & qu, const tf2::Quaternion & qf)
+  static void compute_swing_pitch_roll(
+    const tf2::Matrix3x3 & R_now,
+    const tf2::Matrix3x3 & R_calib,
+    double & pitch, double & roll)
   {
-    tf2::Matrix3x3 Ru(qu), Rf(qf);
-    tf2::Vector3 bu = Ru * tf2::Vector3(1, 0, 0);
-    tf2::Vector3 bf = Rf * tf2::Vector3(1, 0, 0);
-    return {
-      {"shoulder_pitch_joint", std::atan2(-bu.z(), bu.x())},
-      {"shoulder_roll_joint",  std::asin(std::clamp( bu.y(), -1.0, 1.0))},
-      {"upperarm_joint",       compute_twist(Ru)},
-      {"elbow_joint",          std::acos(std::clamp(bu.dot(bf), -1.0, 1.0))},
-      {"wrist_joint",          compute_twist(Rf)}
-    };
+    const tf2::Vector3 bu_c = R_calib.transpose() * (R_now * tf2::Vector3(1,0,0));
+    const tf2::Vector3 home(1.0, 0.0, 0.0);
+    tf2::Vector3 sa = home.cross(bu_c);
+    const double sa_len = sa.length();
+    if (sa_len < 1e-6) { pitch = 0.0; roll = 0.0; return; }
+    sa /= sa_len;
+    const double angle = std::acos(std::clamp(home.dot(bu_c), -1.0, 1.0));
+    pitch = angle * sa.z();
+    roll  = angle * sa.y();
   }
 
-  // ── IMU callback (100Hz) — คำนวณและเก็บ latest_positions_ ────────────────
-  void imu_cb(
-    const ImuMsg::ConstSharedPtr & upper,
-    const ImuMsg::ConstSharedPtr & fore)
+  static double compute_twist_swing(
+    const tf2::Matrix3x3 & R_now,
+    const tf2::Matrix3x3 & R_calib)
   {
-    tf2::Quaternion qu(upper->orientation.x, upper->orientation.y,
-                       upper->orientation.z, upper->orientation.w);
-    tf2::Quaternion qf(fore->orientation.x,  fore->orientation.y,
-                       fore->orientation.z,  fore->orientation.w);
-    qu.normalize(); qf.normalize();
-
-    auto angles = compute_joint_angles(qu, qf);
-
-    std::lock_guard<std::mutex> lock(calib_mutex_);
-
-    // ── Calibration ───────────────────────────────────────────────────────────
-    if (calibrating_) {
-      for (const auto & n : joint_names_) calib_accum_[n] += angles[n];
-      if (++calib_count_ >= calib_samples_) {
-        for (const auto & n : joint_names_)
-          ref_angles_[n] = calib_accum_[n] / calib_count_;
-        calibrating_ = false;
-        ready_       = true;
-        for (auto & [n, cfg] : joint_configs_) cfg.lpf.reset(0.0);
-        RCLCPP_INFO(get_logger(), "━━━ Calibration complete! ━━━");
-        for (const auto & n : joint_names_)
-          RCLCPP_INFO(get_logger(), "  %-25s ref = %6.3f rad (%5.1f deg)",
-            n.c_str(), ref_angles_[n], ref_angles_[n] * 180.0 / M_PI);
-        RCLCPP_INFO(get_logger(), "Robot will now follow arm movement.");
-      }
-      return;
+    const tf2::Vector3 bc = R_calib * tf2::Vector3(1,0,0);
+    const tf2::Vector3 bn = R_now   * tf2::Vector3(1,0,0);
+    tf2::Vector3 sa = bc.cross(bn);
+    const double sa_len = sa.length();
+    const double cos_a  = std::clamp(bc.dot(bn), -1.0, 1.0);
+    tf2::Matrix3x3 Rs;
+    if (sa_len < 1e-6) {
+      Rs = (cos_a > 0.0) ? R_calib : [&]() {
+        tf2::Vector3 ax = std::abs(bc.x()) < 0.9 ?
+          tf2::Vector3(1,0,0) : tf2::Vector3(0,1,0);
+        tf2::Vector3 a = bc.cross(ax); a /= a.length();
+        return tf2::Matrix3x3(
+          2*a.x()*a.x()-1, 2*a.x()*a.y(),   2*a.x()*a.z(),
+          2*a.y()*a.x(),   2*a.y()*a.y()-1, 2*a.y()*a.z(),
+          2*a.z()*a.x(),   2*a.z()*a.y(),   2*a.z()*a.z()-1) * R_calib;
+      }();
+    } else {
+      sa /= sa_len;
+      const double ang = std::atan2(sa_len, cos_a);
+      const double s=std::sin(ang), c=std::cos(ang), t=1.0-c;
+      const double x=sa.x(), y=sa.y(), z=sa.z();
+      Rs = tf2::Matrix3x3(
+        t*x*x+c,   t*x*y-s*z, t*x*z+s*y,
+        t*x*y+s*z, t*y*y+c,   t*y*z-s*x,
+        t*x*z-s*y, t*y*z+s*x, t*z*z+c) * R_calib;
     }
-
-    if (!ready_) return;
-
-    // ── Compute robot positions ───────────────────────────────────────────────
-    std_msgs::msg::Float64MultiArray dbg;
-    for (const auto & n : joint_names_) {
-      double rel = (n == "elbow_joint")
-        ? angles[n] - ref_angles_[n]
-        : wrap_pi(angles[n] - ref_angles_[n]);
-
-      auto & cfg = joint_configs_.at(n);
-      double filtered = cfg.lpf.update(rel * cfg.scale);
-      latest_positions_[n] = std::clamp(filtered, cfg.robot_min, cfg.robot_max);
-
-      dbg.data.push_back(rel * 180.0 / M_PI);                      // [0-4] human deg
-    }
-    for (const auto & n : joint_names_)
-      dbg.data.push_back(latest_positions_[n] * 180.0 / M_PI);     // [5-9] robot deg
-
-    pub_debug_->publish(dbg);
-    // goal จะถูกส่งโดย send_timer_ ไม่ใช่ที่นี่
+    const tf2::Matrix3x3 Rt = Rs.transpose() * R_now;
+    return std::atan2(Rt[2][1], Rt[2][2]);
   }
 };
 
