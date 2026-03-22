@@ -71,7 +71,8 @@ public:
     declare_parameter("trajectory_duration",   0.15);
     declare_parameter("imu_timeout_ms",        1000.0);
     declare_parameter("max_jump_deg",          50.0);
-    declare_parameter("soft_limit_margin_deg", 3.0);
+    declare_parameter("soft_limit_margin_deg", 30.0);
+    declare_parameter("action_name",           std::string("/real/arm_controller/follow_joint_trajectory"));
 
     auto_calibrate_ = get_parameter("auto_calibrate").as_bool();
     calib_samples_  = get_parameter("calibration_samples").as_int();
@@ -79,6 +80,7 @@ public:
     imu_timeout_s_  = get_parameter("imu_timeout_ms").as_double() / 1000.0;
     max_jump_rad_   = get_parameter("max_jump_deg").as_double() * M_PI / 180.0;
     use_sim_time_   = get_parameter("use_sim_time").as_bool();
+    action_name_    = get_parameter("action_name").as_string();
 
     const double alpha   = get_parameter("lpf_alpha").as_double();
     const double send_hz = get_parameter("send_hz").as_double();
@@ -113,7 +115,7 @@ public:
     // [แก้ 2] เพิ่ม namespace /real ให้ตรงกับ launch file
     // ============================================================
     action_client_ = rclcpp_action::create_client<FollowJT>(
-      this, "/real/arm_controller/follow_joint_trajectory");
+      this, action_name_);  
 
     pub_debug_ = create_publisher<std_msgs::msg::Float64MultiArray>(
       "/imu_kinematics/joint_angles", 10);
@@ -142,7 +144,7 @@ public:
     RCLCPP_INFO(get_logger(), "  imu_kinematics_node v7  [%.0fHz / traj=%.3fs]",
       send_hz, traj_duration_);
     RCLCPP_INFO(get_logger(), "  use_sim_time : %s", use_sim_time_ ? "true" : "false");
-    RCLCPP_INFO(get_logger(), "  action       : /real/arm_controller/follow_joint_trajectory");
+    RCLCPP_INFO(get_logger(), "  action       : %s", action_name_.c_str());
     RCLCPP_INFO(get_logger(), "  [H1] watchdog   : %.0f ms", imu_timeout_s_*1000);
     RCLCPP_INFO(get_logger(), "  [H2] jump check : %.1f deg", max_jump_rad_*180/M_PI);
     RCLCPP_INFO(get_logger(), "  [H3] vel hints  : enabled");
@@ -172,6 +174,7 @@ private:
   bool         imu_fore_received_{false};
 
   std::atomic<bool> estop_{false};
+  std::string action_name_;
 
   std::mutex     calib_mutex_;
   bool           calibrating_{false};

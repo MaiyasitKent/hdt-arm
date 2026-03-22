@@ -1,13 +1,15 @@
-#!/usr/bin/env python3
 """
 hdt_arm_sim.launch.py
 =====================
-Launch file สำหรับ Gazebo Harmonic simulation
-ทุก node และ topic จะอยู่ใน namespace /sim
+ใช้ Gazebo แทน Dynamixel ทั้งหมด
 
 วิธีใช้:
   ros2 launch hdt_arm_bringup hdt_arm_sim.launch.py
   ros2 launch hdt_arm_bringup hdt_arm_sim.launch.py start_bridge:=true
+
+Digital twin (รันพร้อมกัน 2 terminal):
+  terminal 1: ros2 launch hdt_arm_bringup hdt_arm_real.launch.py
+  terminal 2: ros2 launch hdt_arm_bringup hdt_arm_sim.launch.py start_bridge:=true
 """
 
 import os
@@ -32,36 +34,49 @@ def generate_launch_description():
 
     desc_pkg = get_package_share_directory('hdt_arm_description')
 
-    # Gazebo Harmonic ใช้ GZ_SIM_* ไม่ใช่ IGN_GAZEBO_*
     gz_resource_path = SetEnvironmentVariable(
-        name='GZ_SIM_RESOURCE_PATH',
+        name='IGN_GAZEBO_RESOURCE_PATH',
         value=[os.path.join(desc_pkg, '..'), ':' + desc_pkg],
     )
     gz_model_path = SetEnvironmentVariable(
-        name='GZ_SIM_MODEL_PATH',
+        name='IGN_GAZEBO_MODEL_PATH',
         value=[os.path.join(desc_pkg, '..')],
     )
 
     declared_arguments = [
-        DeclareLaunchArgument('start_rviz',   default_value='true'),
-        DeclareLaunchArgument('start_bridge', default_value='false',
+        DeclareLaunchArgument('start_rviz',       default_value='true'),
+        DeclareLaunchArgument('init_position',    default_value='true'),
+        DeclareLaunchArgument('start_bridge',     default_value='false',
             description='เปิด joint_state_bridge เพื่อให้ sim follow real'),
+        DeclareLaunchArgument('start_imu_teleop', default_value='false'),
     ]
 
-    start_rviz   = LaunchConfiguration('start_rviz')
-    start_bridge = LaunchConfiguration('start_bridge')
+    start_rviz       = LaunchConfiguration('start_rviz')
+    init_position    = LaunchConfiguration('init_position')
+    start_bridge     = LaunchConfiguration('start_bridge')
+    start_imu_teleop = LaunchConfiguration('start_imu_teleop')
 
+    # process xacro ด้วย ros_namespace=sim
     xacro_file = os.path.join(desc_pkg, 'urdf', 'hdt_arm.urdf.xacro')
-    doc = xacro.process_file(xacro_file, mappings={'use_sim': 'true'})
-    robot_desc = doc.toprettyxml(indent='  ')
+    doc = xacro.process_file(xacro_file, mappings={
+        'use_sim':       'true',
+        'ros_namespace': 'sim',
+    })
+    robot_desc_sim = doc.toprettyxml(indent='  ')
 
-    # yaml สำหรับ sim namespace
     controllers_yaml = PathJoinSubstitution([
         FindPackageShare('hdt_arm_description'),
         'config', 'ros2_controllers_sim.yaml',
     ])
+    rviz_config = PathJoinSubstitution([
+        FindPackageShare('hdt_arm_description'),
+        'rviz', 'hdt_arm.rviz',
+    ])
+    initial_positions_yaml = PathJoinSubstitution([
+        FindPackageShare('hdt_arm_description'),
+        'config', 'home_position_params.yaml',
+    ])
 
-    # Gazebo Harmonic ใช้ gz_args ไม่ใช่ ign_args
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             os.path.join(
@@ -77,30 +92,6 @@ def generate_launch_description():
         }.items(),
     )
 
-    robot_state_publisher = Node(
-        package='robot_state_publisher',
-        executable='robot_state_publisher',
-        namespace='sim',
-        output='screen',
-        parameters=[{
-            'robot_description': robot_desc,
-            'use_sim_time': True,
-            'frame_prefix': 'sim/',
-        }],
-    )
-
-    gz_spawn = Node(
-        package='ros_gz_sim',
-        executable='create',
-        output='screen',
-        arguments=[
-            '-string', robot_desc,
-            '-name',   'hdt_arm',
-            '-x', '0.0', '-y', '0.0', '-z', '0.0',
-            '-allow_renaming', 'true',
-        ],
-    )
-
     bridge_clock = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
@@ -108,7 +99,31 @@ def generate_launch_description():
         output='screen',
     )
 
-    # ส่ง --param-file เพื่อให้ controller_manager รู้จัก type ของ controller
+    robot_state_publisher = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        namespace='sim',
+        parameters=[{
+            'robot_description': robot_desc_sim,
+            'use_sim_time': True,
+            'publish_frequency': 50.0,
+        }],
+        remappings=[('robot_description', '/sim/robot_description')],
+        output='screen',
+    )
+
+    gz_spawn = Node(
+        package='ros_gz_sim',
+        executable='create',
+        output='screen',
+        arguments=[
+            '-string', robot_desc_sim,
+            '-name',   'hdt_arm',
+            '-x', '0.0', '-y', '0.0', '-z', '0.0',
+            '-allow_renaming', 'true',
+        ],
+    )
+
     joint_state_broadcaster_spawner = Node(
         package='controller_manager',
         executable='spawner',
@@ -134,20 +149,40 @@ def generate_launch_description():
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
-        arguments=['-d', os.path.join(desc_pkg, 'rviz', 'hdt_arm.rviz')],
+        arguments=['-d', rviz_config],
         parameters=[{'use_sim_time': True}],
         output='screen',
         condition=IfCondition(start_rviz),
     )
 
+    home_position_node = Node(
+        package='hdt_arm_teleop',
+        executable='home_position',
+        namespace='sim',
+        parameters=[
+            initial_positions_yaml,
+            {'use_sim_time': True},
+        ],
+        output='screen',
+        condition=IfCondition(init_position),
+    )
+
+    imu_kinematics_node = Node(
+        package='hdt_arm_teleop',
+        executable='imu_kinematics_node',
+        parameters=[{'use_sim_time': True}],
+        output='screen',
+        condition=IfCondition(start_imu_teleop),
+    )
+
     joint_state_bridge = Node(
         package='hdt_arm_teleop',
         executable='joint_state_bridge',
-        name='joint_state_bridge',
         output='screen',
         condition=IfCondition(start_bridge),
     )
 
+    # gz_spawn เสร็จ → jsb
     on_spawn_done = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=gz_spawn,
@@ -155,6 +190,7 @@ def generate_launch_description():
         )
     )
 
+    # jsb เสร็จ → arm_controller
     on_jsb_done = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=joint_state_broadcaster_spawner,
@@ -162,10 +198,11 @@ def generate_launch_description():
         )
     )
 
+    # arm_controller เสร็จ → rviz + home + imu + bridge
     on_arm_done = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=arm_controller_spawner,
-            on_exit=[rviz_node, joint_state_bridge],
+            on_exit=[rviz_node, home_position_node, imu_kinematics_node, joint_state_bridge],
         )
     )
 
@@ -174,9 +211,9 @@ def generate_launch_description():
         gz_model_path,
         *declared_arguments,
         gazebo,
+        bridge_clock,
         robot_state_publisher,
         gz_spawn,
-        bridge_clock,
         on_spawn_done,
         on_jsb_done,
         on_arm_done,

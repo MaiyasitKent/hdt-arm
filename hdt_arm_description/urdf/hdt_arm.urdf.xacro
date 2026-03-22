@@ -11,6 +11,7 @@
   <xacro:arg name="prefix"               default=""/>
   <xacro:arg name="initial_positions_file"
              default="$(find hdt_arm_description)/config/initial_positions.yaml"/>
+  <xacro:arg name="ros_namespace"        default="real"/>
 
   <!-- Import URDF หลัก (geometry + joints) -->
   <xacro:include filename="$(find hdt_arm_description)/urdf/hdt_arm.urdf"/>
@@ -25,6 +26,7 @@
     use_mock_hardware="$(arg use_mock_hardware)"
     mock_sensor_commands="$(arg mock_sensor_commands)"
     port_name="$(arg port_name)"
-    initial_positions_file="$(arg initial_positions_file)"/>
+    initial_positions_file="$(arg initial_positions_file)"
+    ros_namespace="$(arg ros_namespace)"/>
 
 </robot>

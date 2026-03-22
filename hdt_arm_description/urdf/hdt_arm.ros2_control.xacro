@@ -6,7 +6,8 @@
             use_mock_hardware:=false
             mock_sensor_commands:=false
             port_name:=/dev/ttyUSB0
-            initial_positions_file">
+            initial_positions_file
+            ros_namespace:=real">
 
     <xacro:property name="initial_positions"
       value="${xacro.load_yaml(initial_positions_file)['initial_positions']}"/>
@@ -14,11 +15,14 @@
     <!-- Gazebo Harmonic plugin (sim mode only) -->
     <xacro:if value="${use_sim}">
       <gazebo>
-        <plugin filename="libgz_ros2_control-system.so"
+        <!-- ลบ lib นำหน้า และลบ .so ออก -->
+        <plugin filename="gz_ros2_control-system"
                 name="gz_ros2_control::GazeboSimROS2ControlPlugin">
           <parameters>$(find hdt_arm_description)/config/ros2_controllers_sim.yaml</parameters>
+          <robot_param>robot_description</robot_param>
+          <robot_param_node>robot_state_publisher</robot_param_node>
           <ros>
-            <namespace>sim</namespace>
+            <namespace>${ros_namespace}</namespace>
           </ros>
         </plugin>
       </gazebo>
@@ -50,7 +54,7 @@
             <param name="port_name">${port_name}</param>
             <param name="baud_rate">57600</param>
             <param name="protocol_version">2.0</param>
-            <param name="use_fast_sync_read">false</param>
+            <param name="use_fast_sync_read">true</param>
             <param name="error_timeout_ms">3000</param>
             <param name="dynamixel_model_folder">/param/dxl_model</param>
             <param name="number_of_joints">5</param>
