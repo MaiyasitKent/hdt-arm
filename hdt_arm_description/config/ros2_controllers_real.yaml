@@ -22,5 +22,5 @@ real:
         - velocity
       allow_partial_joints_goal: false
       constraints:
-        stopped_velocity_tolerance: 0.05
-        goal_time: 2.0
+        stopped_velocity_tolerance: 0.1
+        goal_time: 0.5

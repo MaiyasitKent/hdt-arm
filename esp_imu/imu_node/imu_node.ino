@@ -31,8 +31,8 @@
 #define SERIAL_BAUD 115200   // สูงสุดที่ ESP32 USB-CDC รองรับ
 
 // =================(SetDevice)=================
-// #define DEVICE_IS_UPPERARM
-#define DEVICE_IS_FOREARM
+#define DEVICE_IS_UPPERARM
+// #define DEVICE_IS_FOREARM
 
 #ifdef DEVICE_IS_UPPERARM
   const int    UDP_PORT    = 8888;
