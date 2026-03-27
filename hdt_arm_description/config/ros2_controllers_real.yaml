@@ -1,7 +1,7 @@
 real:
   controller_manager:
     ros__parameters:
-      update_rate: 100          # เพิ่มจาก 50 → 100
+      update_rate: 20         # เพิ่มจาก 50 → 100
       joint_state_broadcaster:
         type: joint_state_broadcaster/JointStateBroadcaster
       arm_controller:

@@ -12,12 +12,12 @@ ImuKinematicsNode::ImuKinematicsNode()
 {
   declare_parameter("auto_calibrate",        true);
   declare_parameter("calibration_samples",   50);
-  declare_parameter("lpf_alpha",             0.35);
-  declare_parameter("send_hz",               25.0);
-  declare_parameter("trajectory_duration",   0.06);
+  declare_parameter("lpf_alpha",             0.3);
+  declare_parameter("send_hz",               10.0);
+  declare_parameter("trajectory_duration",   0.07);
   declare_parameter("imu_timeout_ms",        200.0);
-  declare_parameter("max_jump_deg",          20.0);
-  declare_parameter("soft_limit_margin_deg", 5.0);
+  declare_parameter("max_jump_deg",          45.0);
+  declare_parameter("soft_limit_margin_deg", 10.0);
   declare_parameter("action_name",
     std::string("/real/arm_controller/follow_joint_trajectory"));
 
@@ -274,12 +274,12 @@ void ImuKinematicsNode::send_goal_now()
     return;
   }
 
-  // cancel goal เก่าถ้ายังอยู่
+  // ถ้า goal เดิมยังรันอยู่ให้ข้ามไป ไม่ cancel ไม่ส่งซ้อน
   if (current_gh_) {
     const auto status = current_gh_->get_status();
     if (status == rclcpp_action::GoalStatus::STATUS_ACCEPTED ||
         status == rclcpp_action::GoalStatus::STATUS_EXECUTING) {
-      action_client_->async_cancel_goal(current_gh_);
+      return;
     }
     current_gh_ = nullptr;
   }

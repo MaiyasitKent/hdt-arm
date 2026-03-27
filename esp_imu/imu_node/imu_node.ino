@@ -93,7 +93,7 @@ void setup() {
   if (!bno08x.begin_I2C()) {
     while (1) { digitalWrite(LED_PIN, !digitalRead(LED_PIN)); delay(100); }
   }
-  bno08x.enableReport(SH2_ROTATION_VECTOR, 5000); // 200Hz
+  bno08x.enableReport(SH2_ROTATION_VECTOR, 20000); // 50Hz
 }
 
 void loop() {

@@ -54,7 +54,7 @@
             <param name="port_name">${port_name}</param>
             <param name="baud_rate">57600</param>
             <param name="protocol_version">2.0</param>
-            <param name="use_fast_sync_read">true</param>
+            <param name="use_fast_sync_read">false</param>
             <param name="error_timeout_ms">3000</param>
             <param name="dynamixel_model_folder">/param/dxl_model</param>
             <param name="number_of_joints">5</param>
@@ -129,9 +129,9 @@
           <param name="Return Delay Time">0</param>
           <param name="Position P Gain">800</param>
           <param name="Position I Gain">0</param>
-          <param name="Position D Gain">400</param>
-          <param name="Profile Velocity">600</param>
-          <param name="Profile Acceleration">300</param>
+          <param name="Position D Gain">300</param>
+          <param name="Profile Velocity">1000</param>
+          <param name="Profile Acceleration">800</param>
         </gpio>
 
         <gpio name="dxl1">
@@ -145,9 +145,9 @@
           <param name="Return Delay Time">0</param>
           <param name="Position P Gain">800</param>
           <param name="Position I Gain">0</param>
-          <param name="Position D Gain">0</param>
-          <param name="Profile Velocity">600</param>
-          <param name="Profile Acceleration">300</param>
+          <param name="Position D Gain">300</param>
+          <param name="Profile Velocity">1000</param>
+          <param name="Profile Acceleration">800</param>
         </gpio>
 
         <gpio name="dxl2">
@@ -160,10 +160,10 @@
           <param name="Operating Mode">3</param>
           <param name="Return Delay Time">0</param>
           <param name="Position P Gain">800</param>
-          <param name="Position I Gain">0</param>
-          <param name="Position D Gain">0</param>
-          <param name="Profile Velocity">600</param>
-          <param name="Profile Acceleration">300</param>
+          <param name="Position I Gain">20</param>
+          <param name="Position D Gain">300</param>
+          <param name="Profile Velocity">1000</param>
+          <param name="Profile Acceleration">800</param>
         </gpio>
 
         <gpio name="dxl3">
@@ -176,10 +176,10 @@
           <param name="Operating Mode">3</param>
           <param name="Return Delay Time">0</param>
           <param name="Position P Gain">800</param>
-          <param name="Position I Gain">0</param>
-          <param name="Position D Gain">0</param>
-          <param name="Profile Velocity">600</param>
-          <param name="Profile Acceleration">300</param>
+          <param name="Position I Gain">10</param>
+          <param name="Position D Gain">550</param>
+          <param name="Profile Velocity">500</param>
+          <param name="Profile Acceleration">500</param>
         </gpio>
 
         <gpio name="dxl4">
@@ -191,10 +191,10 @@
           <param name="Drive Mode">4</param>
           <param name="Operating Mode">3</param>
           <param name="Return Delay Time">0</param>
-          <param name="Position P Gain">800</param>
-          <param name="Position I Gain">0</param>
-          <param name="Position D Gain">0</param>
-          <param name="Profile Velocity">600</param>
+          <param name="Position P Gain">500</param>
+          <param name="Position I Gain">5</param>
+          <param name="Position D Gain">350</param>
+          <param name="Profile Velocity">500</param>
           <param name="Profile Acceleration">300</param>
         </gpio>
 

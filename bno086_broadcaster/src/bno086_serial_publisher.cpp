@@ -61,8 +61,8 @@ class DualSerialImuNode : public rclcpp::Node {
 public:
   DualSerialImuNode() : Node("serial_imu_node") {
 
-    declare_parameter("upper_port",   "/dev/ttyUSB0");
-    declare_parameter("forearm_port", "/dev/ttyUSB1");
+    declare_parameter("upper_port",   "/dev/ttyUSB1");
+    declare_parameter("forearm_port", "/dev/ttyUSB2");
     declare_parameter("baud",         115200);
 
     int baud = get_parameter("baud").as_int();
