@@ -15,7 +15,7 @@ ImuKinematicsNode::ImuKinematicsNode()
   declare_parameter("lpf_alpha",             0.3);
   declare_parameter("send_hz",               10.0);
   declare_parameter("trajectory_duration",   0.07);
-  declare_parameter("imu_timeout_ms",        200.0);
+  declare_parameter("imu_timeout_ms",        500.0);
   declare_parameter("max_jump_deg",          45.0);
   declare_parameter("soft_limit_margin_deg", 10.0);
   declare_parameter("action_name",
@@ -41,6 +41,7 @@ ImuKinematicsNode::ImuKinematicsNode()
 
   latest_pos_.fill(0.0);
   prev_pos_.fill(0.0);
+  synced_pos_.fill(0.0);
   qu_latest_ = tf2::Quaternion(0, 0, 0, 1);
   qf_latest_ = tf2::Quaternion(0, 0, 0, 1);
 
@@ -77,6 +78,54 @@ ImuKinematicsNode::ImuKinematicsNode()
   sub_fore_ = create_subscription<ImuMsg>(
     "/imu/forearm", rclcpp::SensorDataQoS(),
     std::bind(&ImuKinematicsNode::fore_cb, this, std::placeholders::_1));
+
+  // ── recovery subscribers ──────────────────────────────────────────────────
+
+  // อ่านตำแหน่งจริงของ servo อย่างต่อเนื่อง
+  // map โดยชื่อ joint ไม่ใช่ index เพราะ joint_states ไม่รับประกันลำดับ
+  sub_joint_states_ = create_subscription<sensor_msgs::msg::JointState>(
+    "/real/joint_states", rclcpp::SensorDataQoS(),
+    [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
+      std::lock_guard<std::mutex> lock(sync_mutex_);
+      bool all_found = true;
+      for (int i = 0; i < NUM_JOINTS; i++) {
+        auto it = std::find(msg->name.begin(), msg->name.end(), JOINT_NAMES[i]);
+        if (it == msg->name.end()) {
+          all_found = false;
+          continue;
+        }
+        const int idx = static_cast<int>(std::distance(msg->name.begin(), it));
+        if (idx < static_cast<int>(msg->position.size())) {
+          synced_pos_[i] = msg->position[idx];  // i  = index ของ JOINT_NAMES
+                                                 // idx = index ใน message
+        }
+      }
+      if (all_found) joint_states_received_ = true;
+    });
+
+  // รับสัญญาณจาก HardwareRecoveryNode หลัง controller กลับมา active
+  sub_resync_ = create_subscription<std_msgs::msg::Bool>(
+    "/hw_recovery/resync", 10,
+    [this](const std_msgs::msg::Bool::SharedPtr) {
+      std::lock_guard<std::mutex> lock(sync_mutex_);
+
+      // ยังไม่เคยรับ joint_states เลย — ยังไม่รู้ตำแหน่งจริง อย่า sync
+      if (!joint_states_received_) {
+        RCLCPP_WARN(get_logger(),
+          "Resync requested but no joint_states received yet — skipping");
+        return;
+      }
+
+      // แจ้งเตือนถ้า resync มาระหว่าง calibrate
+      // ไม่ยกเลิก calibrate แค่ sync position ไว้รอ
+      if (calibrating_) {
+        RCLCPP_WARN(get_logger(),
+          "Resync during calibration — position synced, calibration continues");
+      }
+
+      pending_resync_ = true;
+      RCLCPP_INFO(get_logger(), "Resync signal received — will sync on next timer tick");
+    });
 
   const auto ms = std::chrono::milliseconds(static_cast<int>(1000.0 / send_hz));
   send_timer_ = create_wall_timer(
@@ -163,7 +212,23 @@ void ImuKinematicsNode::calib_cb(
 
 void ImuKinematicsNode::timer_cb()
 {
+  // estop ต้องชนะเสมอ — เช็คก่อนทุกอย่าง
   if (estop_.load()) return;
+
+  // resync หลัง hardware recovery — sync position จากค่าจริงก่อนส่ง goal
+  {
+    std::lock_guard<std::mutex> lock(sync_mutex_);
+    if (pending_resync_) {
+      latest_pos_ = synced_pos_;
+      prev_pos_   = synced_pos_;
+      for (int i = 0; i < NUM_JOINTS; i++)
+        lpf_[i].reset(synced_pos_[i]);  // reset ด้วยค่าจริง ไม่ใช่ 0
+      pending_resync_ = false;
+      RCLCPP_INFO(get_logger(),
+        "Position resynced from hardware feedback — resuming safely");
+      return;  // ข้ามรอบนี้ ส่ง goal รอบถัดไปเมื่อ state พร้อม
+    }
+  }
 
   // 1. copy IMU state under lock
   tf2::Quaternion qu, qf;

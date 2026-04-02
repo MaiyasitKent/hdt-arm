@@ -66,9 +66,10 @@ String    lastSSID           = "";
 
 void updateTargetIP() {
   String ssid = WiFi.SSID();
-  if      (ssid == "Worm_32.exe_2.5G") current_target_ip = "192.168.1.255";
+  if      (ssid == "8220-free wifi")   current_target_ip = "192.168.0.255";
   else if (ssid == "Ju9Sork")          current_target_ip = "172.20.10.15";
-  else                                  current_target_ip = "192.168.1.255";
+  else if (ssid == "Worm_32.exe_2.5G") current_target_ip = "192.168.1.255";
+  else                                 current_target_ip = "192.168.1.255";
 }
 
 // ================= IMU =================
@@ -80,6 +81,7 @@ void setup() {
   Serial.begin(SERIAL_BAUD);
   pinMode(LED_PIN, OUTPUT);
 
+  wifiMulti.addAP("8220-free wifi", "password1234");
   wifiMulti.addAP("Worm_32.exe_2.5G", "0E040E270E22");
   wifiMulti.addAP("Ju9Sork", "password");
 

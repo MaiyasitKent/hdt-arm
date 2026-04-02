@@ -44,7 +44,7 @@ public:
 
     // Publisher ส่ง trajectory ไปที่ arm_controller
     publisher_ = this->create_publisher<trajectory_msgs::msg::JointTrajectory>(
-      "/arm_controller/joint_trajectory", 10);
+      "/real/arm_controller/follow_joint_trajectory", 10);
 
     // รอให้ controller พร้อมก่อนส่ง (2 วินาที)
     timer_ = this->create_wall_timer(

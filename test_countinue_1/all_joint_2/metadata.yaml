@@ -1,0 +1,82 @@
+rosbag2_bagfile_information:
+  version: 5
+  storage_identifier: sqlite3
+  duration:
+    nanoseconds: 299444030933
+  starting_time:
+    nanoseconds_since_epoch: 1775031998235422122
+  message_count: 12503
+  topics_with_message_count:
+    - topic_metadata:
+        name: /accuracy/joint_positions
+        type: std_msgs/msg/Float64MultiArray
+        serialization_format: cdr
+        offered_qos_profiles: "- history: 1\n  depth: 10\n  reliability: 1\n  durability: 2\n  deadline:\n    sec: 9223372036\n    nsec: 854775807\n  lifespan:\n    sec: 9223372036\n    nsec: 854775807\n  liveliness: 1\n  liveliness_lease_duration:\n    sec: 9223372036\n    nsec: 854775807\n  avoid_ros_namespace_conventions: false"
+      message_count: 12503
+  compression_format: ""
+  compression_mode: ""
+  relative_file_paths:
+    - all_joint_2_0.db3
+    - all_joint_2_1.db3
+    - all_joint_2_2.db3
+    - all_joint_2_3.db3
+    - all_joint_2_4.db3
+    - all_joint_2_5.db3
+    - all_joint_2_6.db3
+    - all_joint_2_7.db3
+    - all_joint_2_8.db3
+  files:
+    - path: all_joint_2_0.db3
+      starting_time:
+        nanoseconds_since_epoch: 1775031998235422122
+      duration:
+        nanoseconds: 29985540235
+      message_count: 1500
+    - path: all_joint_2_1.db3
+      starting_time:
+        nanoseconds_since_epoch: 1775032028240971975
+      duration:
+        nanoseconds: 29985064965
+      message_count: 1500
+    - path: all_joint_2_2.db3
+      starting_time:
+        nanoseconds_since_epoch: 1775032058246424840
+      duration:
+        nanoseconds: 17602240791
+      message_count: 881
+    - path: all_joint_2_3.db3
+      starting_time:
+        nanoseconds_since_epoch: 1775032125223789744
+      duration:
+        nanoseconds: 29985746995
+      message_count: 1500
+    - path: all_joint_2_4.db3
+      starting_time:
+        nanoseconds_since_epoch: 1775032155229513124
+      duration:
+        nanoseconds: 29987567766
+      message_count: 1500
+    - path: all_joint_2_5.db3
+      starting_time:
+        nanoseconds_since_epoch: 1775032185237163314
+      duration:
+        nanoseconds: 29986645779
+      message_count: 1500
+    - path: all_joint_2_6.db3
+      starting_time:
+        nanoseconds_since_epoch: 1775032215243794098
+      duration:
+        nanoseconds: 29986180520
+      message_count: 1500
+    - path: all_joint_2_7.db3
+      starting_time:
+        nanoseconds_since_epoch: 1775032245250055777
+      duration:
+        nanoseconds: 29985424127
+      message_count: 1500
+    - path: all_joint_2_8.db3
+      starting_time:
+        nanoseconds_since_epoch: 1775032275255456937
+      duration:
+        nanoseconds: 22423996118
+      message_count: 1122

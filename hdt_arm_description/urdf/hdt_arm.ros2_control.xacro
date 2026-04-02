@@ -128,8 +128,8 @@
           <param name="Operating Mode">3</param>
           <param name="Return Delay Time">0</param>
           <param name="Position P Gain">800</param>
-          <param name="Position I Gain">0</param>
-          <param name="Position D Gain">300</param>
+          <param name="Position I Gain">10</param>
+          <param name="Position D Gain">550</param>
           <param name="Profile Velocity">1000</param>
           <param name="Profile Acceleration">800</param>
         </gpio>
@@ -144,8 +144,8 @@
           <param name="Operating Mode">3</param>
           <param name="Return Delay Time">0</param>
           <param name="Position P Gain">800</param>
-          <param name="Position I Gain">0</param>
-          <param name="Position D Gain">300</param>
+          <param name="Position I Gain">10</param>
+          <param name="Position D Gain">550</param>
           <param name="Profile Velocity">1000</param>
           <param name="Profile Acceleration">800</param>
         </gpio>
@@ -160,8 +160,8 @@
           <param name="Operating Mode">3</param>
           <param name="Return Delay Time">0</param>
           <param name="Position P Gain">800</param>
-          <param name="Position I Gain">20</param>
-          <param name="Position D Gain">300</param>
+          <param name="Position I Gain">10</param>
+          <param name="Position D Gain">550</param>
           <param name="Profile Velocity">1000</param>
           <param name="Profile Acceleration">800</param>
         </gpio>

@@ -1,0 +1,26 @@
+rosbag2_bagfile_information:
+  version: 5
+  storage_identifier: sqlite3
+  duration:
+    nanoseconds: 27486714545
+  starting_time:
+    nanoseconds_since_epoch: 1775030416280897952
+  message_count: 1375
+  topics_with_message_count:
+    - topic_metadata:
+        name: /accuracy/joint_positions
+        type: std_msgs/msg/Float64MultiArray
+        serialization_format: cdr
+        offered_qos_profiles: "- history: 1\n  depth: 10\n  reliability: 1\n  durability: 2\n  deadline:\n    sec: 9223372036\n    nsec: 854775807\n  lifespan:\n    sec: 9223372036\n    nsec: 854775807\n  liveliness: 1\n  liveliness_lease_duration:\n    sec: 9223372036\n    nsec: 854775807\n  avoid_ros_namespace_conventions: false"
+      message_count: 1375
+  compression_format: ""
+  compression_mode: ""
+  relative_file_paths:
+    - wrist_joint_0.db3
+  files:
+    - path: wrist_joint_0.db3
+      starting_time:
+        nanoseconds_since_epoch: 1775030416280897952
+      duration:
+        nanoseconds: 27486714545
+      message_count: 1375

@@ -3,6 +3,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>        // เพิ่ม: สำหรับ sub_joint_states_
+#include <std_msgs/msg/bool.hpp>                  // เพิ่ม: สำหรับ sub_resync_
 #include <control_msgs/action/follow_joint_trajectory.hpp>
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
 #include <std_srvs/srv/trigger.hpp>
@@ -63,6 +65,12 @@ private:
   // ── safety ───────────────────────────────────────────────────
   std::atomic<bool> estop_{false};
 
+  // ── recovery ─────────────────────────────────────────────────
+  std::mutex                     sync_mutex_;
+  std::array<double, NUM_JOINTS> synced_pos_{};     // ตำแหน่งจริงจาก feedback
+  bool                           pending_resync_{false};
+  bool                           joint_states_received_{false}; // เพิ่ม: guard ป้องกัน sync ค่า zero
+
   // ── ROS2 interfaces ──────────────────────────────────────────
   rclcpp_action::Client<FollowJT>::SharedPtr                     action_client_;
   GoalHandle::SharedPtr                                          current_gh_{nullptr};
@@ -71,6 +79,8 @@ private:
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr             srv_estop_;
   rclcpp::TimerBase::SharedPtr                                   send_timer_;
   rclcpp::Subscription<ImuMsg>::SharedPtr                        sub_upper_, sub_fore_;
+  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr  sub_joint_states_; // เพิ่ม
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr           sub_resync_;        // เพิ่ม
 
   // ── callbacks ────────────────────────────────────────────────
   void upper_cb(const ImuMsg::ConstSharedPtr & msg);

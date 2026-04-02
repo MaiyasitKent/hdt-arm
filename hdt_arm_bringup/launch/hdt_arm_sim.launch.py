@@ -20,6 +20,7 @@ from launch.actions import (
     IncludeLaunchDescription,
     RegisterEventHandler,
     SetEnvironmentVariable,
+    TimerAction,
 )
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
@@ -175,14 +176,24 @@ def generate_launch_description():
         condition=IfCondition(start_imu_teleop),
     )
 
+    # ── joint_state_bridge ────────────────────────────────────────────────────
+    # สร้าง Node ครั้งเดียว ไม่มี condition ที่ตัว Node
+    # ใช้ TimerAction + condition แทน เพื่อหลีกเลี่ยง Node ถูกสร้าง 2 instance
     joint_state_bridge = Node(
         package='hdt_arm_teleop',
         executable='joint_state_bridge',
+        parameters=[{'use_sim_time': True}],
         output='screen',
-        condition=IfCondition(start_bridge),
     )
 
-    # gz_spawn เสร็จ → jsb
+    bridge_with_condition = TimerAction(
+        period=5.0,   # รอ 5 วิหลัง launch ให้ controller ready ก่อน
+        actions=[joint_state_bridge],
+        condition=IfCondition(start_bridge),
+    )
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # gz_spawn เสร็จ → joint_state_broadcaster
     on_spawn_done = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=gz_spawn,
@@ -190,7 +201,7 @@ def generate_launch_description():
         )
     )
 
-    # jsb เสร็จ → arm_controller
+    # joint_state_broadcaster เสร็จ → arm_controller
     on_jsb_done = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=joint_state_broadcaster_spawner,
@@ -198,11 +209,12 @@ def generate_launch_description():
         )
     )
 
-    # arm_controller เสร็จ → rviz + home + imu + bridge
+    # arm_controller เสร็จ → rviz + home + imu
+    # (bridge ไม่อยู่ตรงนี้แล้ว — ย้ายไปอยู่ใน bridge_with_condition)
     on_arm_done = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=arm_controller_spawner,
-            on_exit=[rviz_node, home_position_node, imu_kinematics_node, joint_state_bridge],
+            on_exit=[rviz_node, home_position_node, imu_kinematics_node],
         )
     )
 
@@ -217,4 +229,5 @@ def generate_launch_description():
         on_spawn_done,
         on_jsb_done,
         on_arm_done,
+        bridge_with_condition,   # ← bridge อยู่ที่นี่ที่เดียว
     ])
