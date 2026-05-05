@@ -132,6 +132,8 @@
           <param name="Position D Gain">550</param>
           <param name="Profile Velocity">1000</param>
           <param name="Profile Acceleration">800</param>
+          <param name="Max Position Limit">4095</param>
+          <param name="Min Position Limit">1024</param>
         </gpio>
 
         <gpio name="dxl1">
@@ -148,6 +150,8 @@
           <param name="Position D Gain">550</param>
           <param name="Profile Velocity">1000</param>
           <param name="Profile Acceleration">800</param>
+          <param name="Max Position Limit">4095</param>
+          <param name="Min Position Limit">2048</param>
         </gpio>
 
         <gpio name="dxl2">
@@ -164,6 +168,8 @@
           <param name="Position D Gain">550</param>
           <param name="Profile Velocity">1000</param>
           <param name="Profile Acceleration">800</param>
+          <param name="Max Position Limit">3072</param>
+          <param name="Min Position Limit">1024</param>
         </gpio>
 
         <gpio name="dxl3">
@@ -180,6 +186,8 @@
           <param name="Position D Gain">550</param>
           <param name="Profile Velocity">500</param>
           <param name="Profile Acceleration">500</param>
+          <param name="Max Position Limit">2048</param>
+          <param name="Min Position Limit">850</param>
         </gpio>
 
         <gpio name="dxl4">
@@ -196,6 +204,8 @@
           <param name="Position D Gain">350</param>
           <param name="Profile Velocity">500</param>
           <param name="Profile Acceleration">300</param>
+          <param name="Max Position Limit">3072</param>
+          <param name="Min Position Limit">1024</param>
         </gpio>
 
       </xacro:unless>
