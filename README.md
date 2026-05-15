@@ -319,7 +319,7 @@ ament_target_dependencies(joint_accuracy_monitor_node
 
 | Description | Link |
 |---|---|
-| HDT ARM Demo | [YouTube](https://youtu.be/your_link_here) |
+| HDT ARM Demo | [YouTube](https://www.youtube.com/watch?v=avqWdkfJH2M&t=41s) |
 ---
 
 ## License
