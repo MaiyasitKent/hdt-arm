@@ -315,7 +315,11 @@ ros2 service call /imu_kinematics/calibrate std_srvs/srv/Trigger
 ament_target_dependencies(joint_accuracy_monitor_node
   rclcpp sensor_msgs std_msgs tf2)
 ```
+## Demo / ตัวอย่างการใช้งาน
 
+| Description | Link |
+|---|---|
+| HDT ARM Demo | [YouTube](https://youtu.be/your_link_here) |
 ---
 
 ## License
